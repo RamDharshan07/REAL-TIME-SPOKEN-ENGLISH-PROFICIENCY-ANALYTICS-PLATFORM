@@ -1,503 +1,417 @@
-# Real-Time Spoken English Proficiency Analytics — Project Documentation
+# Interview Guide — Spoken English Proficiency Analytics
 
-> **Purpose:** Complete technical report for demos, viva, and interview Q&A.  
-> **Stack:** Next.js 16 · React 19 · TypeScript · Tailwind CSS · Browser localStorage  
-> **Repo path:** `nlp/` (App Router under `app/`)
-
----
-
-## 1. Executive summary
-
-This project is a **spoken English practice and analytics web app**. Users practice through:
-
-1. **Live AI voice calls** (Vapi)
-2. **Sentence drills** (echo / tongue-twisters with speech recognition)
-3. **Picture talk** (60-second image description)
-4. **Prompt roulette** (random speaking ideas)
-
-Speech is converted to **text transcripts**, then analyzed with **rule-based NLP** (regex, token statistics, edit distance) plus **optional external APIs** (LanguageTool grammar, OpenAI Whisper, Hugging Face sentiment).
-
-There is **no user login** — session data is stored in **browser localStorage**.
+> **Use this file to prepare for HR, technical, or viva questions.**  
+> Written in plain English. For formulas and file paths, see `PROJECT_DOCUMENTATION.md`.
 
 ---
 
-## 2. Problem statement
+## 1. Elevator pitch (30 seconds)
 
-| Problem | Our approach |
-|--------|----------------|
-| Practice is unstructured | Live AI conversation + timed tasks |
-| Feedback is subjective | Measurable fillers, pace, vocabulary, clarity |
-| Hard to compare sessions | Overall score + trend graph over time |
-| Users don’t see *where* issues occur | Clickable breakdowns with highlighted sentences |
+We built a **web app that helps people practice spoken English** and get **clear, measurable feedback**.
 
----
+The user talks to a **live AI voice assistant** (like a mock interview or conversation). Their speech is turned into **text**. Our app then analyzes that text for **fillers, speed, vocabulary, grammar, clarity, and hesitation** — and shows scores, charts, and coaching tips.
 
-## 3. Technology stack
+We also have **sentence drills**, **picture description tasks**, and **progress graphs** so users can improve over time.
 
-| Layer | Technology |
-|-------|------------|
-| Frontend | Next.js 16 (App Router), React 19, Tailwind CSS 4 |
-| Voice practice | **Vapi Web SDK** (`@vapi-ai/web`) — real-time voice AI |
-| Speech-to-text (drills) | **Browser Web Speech API** (primary); **OpenAI Whisper** (`whisper-1`) fallback |
-| Grammar | **LanguageTool** public API (`en-US`) via `/api/grammar` |
-| Sentiment (optional, not in UI) | **Hugging Face** — `cardiffnlp/twitter-roberta-base-sentiment-latest` |
-| NLP / metrics | **Custom rule-based** — no ML model for core analysis |
-| Storage | `localStorage` keys (transcript, conversation, sessions, drills, picture talk) |
-
-### Environment variables (`.env.example`)
-
-| Variable | Required? | Used for |
-|----------|-----------|----------|
-| `NEXT_PUBLIC_VAPI_PUBLIC_KEY` | Yes (Practice) | Vapi client |
-| `NEXT_PUBLIC_VAPI_ASSISTANT_ID` | Yes (Practice) | Which AI assistant to call |
-| `OPENAI_API_KEY` | Optional | Whisper fallback on `/drills` |
-| `LANGUAGETOOL_API_URL` / `LANGUAGETOOL_API_KEY` | Optional | Premium LanguageTool |
-| `HUGGINGFACE_API_TOKEN` | Optional | `/api/sentiment` only |
+**Tech:** Next.js (React), TypeScript, Vapi for voice, browser storage — no login required for the demo.
 
 ---
 
-## 4. Application routes
+## 2. What is ASR? (Simple answer for interviews)
 
-| Route | Feature |
-|-------|---------|
-| `/` | Landing — workflow overview |
-| `/prompts` | Random speaking prompt spinner |
-| `/practice` | Live Vapi voice call |
-| `/analysis` | Post-call NLP dashboard (7 panels) |
-| `/analysis/graph` | Overall score trend over sessions |
-| `/drills` | Sentence echo drills + minimal pairs |
-| `/picture-talk` | 60s image description task |
-| `/picture-talk/trend` | Picture talk score history |
+**ASR = Automatic Speech Recognition.**
 
-### API routes
+It means: **computer listens to your voice and writes down the words** (speech → text).
 
-| Route | Method | Backend |
-|-------|--------|---------|
-| `/api/grammar` | POST | LanguageTool check |
-| `/api/transcribe` | POST | OpenAI Whisper |
-| `/api/sentiment` | POST | Hugging Face RoBERTa sentiment |
+| Where we use ASR | Service |
+|------------------|---------|
+| Live practice call | **Vapi** (uses a cloud STT engine, often Deepgram on their side) |
+| Sentence drills | **Browser Web Speech API** first; **OpenAI Whisper** if that fails |
+| Picture talk | **Web Speech API** |
+| Clarity voice replay (optional) | **Deepgram or Whisper** on our saved recording — only for **word timestamps**, not for main scores |
+
+**Important line for interviews:**  
+*“We do not build our own speech recognition model. We use proven ASR services, then we run our own analysis on the text (and a small amount of audio processing for hesitation and replay).”*
 
 ---
 
-## 5. End-to-end flow (Practice → Analysis)
+## 3. Real-time or after the call?
+
+**Both — but for different things.**
+
+| When | What happens |
+|------|----------------|
+| **During the call (real-time)** | Vapi streams **live transcript** on screen (last few lines). Mic tracks **mid-answer hesitation** (when you pause mid-sentence). No full score yet. |
+| **When call ends** | Transcript is cleaned and saved. Audio is saved. Hesitation is analyzed. Optional word-level alignment runs. User is sent to **Analysis** page. |
+| **On Analysis page** | **All main metrics are computed** from saved transcript (fillers, fluency, vocabulary, clarity, etc.). Grammar is checked via API. This is **after the call**, in the browser. |
+
+**One-line answer:**  
+*“Live feedback is the transcript preview and hesitation indicator. Full scoring and breakdowns run after the call ends — usually within a few seconds.”*
+
+We do **not** run the full NLP dashboard in real time during the call (that would be heavy and noisy). Real-time ASR is only for **capturing words** and **live preview**.
+
+---
+
+## 4. End-to-end flow (practice session)
 
 ```
-User starts call (Vapi)
-    → Streaming transcript events (user + assistant)
-    → Only FINAL user segments appended (avoids duplication)
-    → Turn-by-turn conversation saved
-    → On call end: normalize transcript, save duration + text
-    → Auto-redirect to /analysis (4s) or manual open
-    → Client computes all metrics from transcript
-    → Grammar checked async via LanguageTool
-    → Session appended to history (deduped by fingerprint)
+1. User opens /practice
+2. Starts Vapi call → speaks English
+3. Vapi sends transcript events (partial + final)
+4. We save only FINAL user text (avoid duplicates)
+5. Mic records user audio in parallel
+6. User ends call
+7. We save:
+   - transcript (localStorage)
+   - call duration
+   - conversation turns (user + AI)
+   - audio file (IndexedDB)
+   - hesitation data from mic
+   - optional word timestamps (Deepgram/Whisper)
+8. Redirect to /analysis
+9. Browser computes all scores + shows 7 panels
+10. Grammar API called in background
+11. Session added to trend graph
 ```
 
-### Transcript deduplication (`lib/practiceTranscript.ts`)
+---
 
-**Problem:** Vapi/streaming ASR sends overlapping partial and final chunks → repeated text.
+## 5. How each metric is analyzed (plain English)
 
-**Techniques:**
-- **Final-only accumulation** — only `transcriptType: "final"` segments extend the stored transcript
-- **Jaccard similarity** (>0.82) to detect near-duplicate utterances
-- **Word-level suffix/prefix overlap merge** when consecutive chunks share words
-- **Sentence-level dedup** on load via `normalizePracticeTranscript()`
+All **main practice scores** use the **user transcript** (your words only, not the AI’s).
+
+### 5.1 Fluency score
+
+**What it measures:** How smooth your speech looks on paper — fewer fillers and fewer repeated words = higher score.
+
+**How:**
+- Count **filler words** (um, uh, like, you know, etc.)
+- Count **back-to-back repeats** (e.g. “I I think”, “the the”)
+- Penalties are **rate-based** (per word), so long speeches are not unfairly punished
+
+**File:** `app/analysis/page.tsx` → `computeBasicMetrics()`
 
 ---
 
-## 6. Feature modules (implementation detail)
+### 5.2 Words per minute (WPM)
 
-### 6.1 Prompt roulette (`/prompts`)
+**What it measures:** Speaking speed.
 
-- **Implementation:** `lib/promptRoulette.ts` — random prompt from a curated list
-- **Technique:** Pure client-side random selection
-- **Purpose:** Warm-up before practice call
-
----
-
-### 6.2 Practice — live voice call (`/practice`)
-
-- **Implementation:** `app/practice/page.tsx` + Vapi Web SDK
-- **Model/service:** Vapi hosts the voice pipeline (STT + LLM + TTS on their side)
-- **What we store:**
-  - `vtfb_user_transcript` — merged **user** speech only (for NLP metrics)
-  - `vtfb_conversation` — JSON array of `{ role: "user" | "assistant", text }` turns
-  - `vtfb_call_duration_sec` — wall-clock call length
-- **UX:** Live rolling preview (last 3 lines), post-call summary (words, WPM, duration), auto-navigate to analysis
-
-**Why user-only transcript for metrics?**  
-Analysis measures *your* fluency, not the AI’s replies.
+**How:**  
+`word count ÷ call duration in minutes`  
+Duration comes from wall-clock time when the call started and ended.
 
 ---
 
-### 6.3 Analysis dashboard (`/analysis`)
+### 5.3 Overall score (0–100)
 
-- **UI:** `components/analysis/AnalysisDashboard.tsx`
-- **Logic:** `app/analysis/page.tsx` (all core scoring functions)
-- **Layout:** Fixed viewport — **one of 7 panels** visible at a time (no long scroll)
+**What it measures:** One headline number for the session.
 
-| Panel # | Section | Content |
-|---------|---------|---------|
-| 01 | Conversation | Chat replay OR plain transcript + radar + coach |
-| 02 | Fluency | Word count, WPM, fluency score |
-| 03 | Disfluency | Hesitation ratio, repetition (clickable breakdown) |
-| 04 | Vocabulary | TTR / MATTR, richness band |
-| 05 | Rhythm | Pause proxies, insight text |
-| 06 | Clarity | Restarts, incomplete sentences, hedging (clickable) |
-| 07 | Fillers | Start/mid/end pattern + breakdown |
+**How:** Weighted mix of:
+- Fluency (45%)
+- Vocabulary richness (25%)
+- Low hesitation from fillers (15%)
+- Low repetition (7.5%)
+- Low total fillers (7.5%)
 
-#### Conversation panel
-
-- **Chat view:** `ConversationTranscriptPanel.tsx` — iMessage-style bubbles (You / AI)
-- **Plain view:** Full normalized transcript
-- **Fallback:** If no conversation JSON, splits user transcript into sentence bubbles
-
-#### Communication radar (`lib/communicationRadar.ts`)
-
-Six-axis spider chart — **derived from existing metrics**, does **not** change overall score.
-
-| Axis | Source | Technique |
-|------|--------|-----------|
-| Vocabulary | `lexicalRichness × 100` | TTR/MATTR |
-| Fluency | `fluencyScore` | Filler + repeat penalties |
-| Grammar | LanguageTool issue count | External API → score formula |
-| Coherence | Proxy | Avg sentence length, repeats, pauses |
-| Clarity | Proxy | Restarts, fragments, hedging penalties |
-| Confidence | Proxy | Hedging + filler-at-start % + hesitation |
-
-#### Coach cards (`lib/coachTips.ts`)
-
-- **Technique:** **Rule-based expert system** (if/else thresholds)
-- **Inputs:** All breakdowns + grammar + pace
-- **Output:** Up to 2 “Strength” + 3 “Next rep” tips
-- **Not ML** — deterministic rules from metrics
-
-#### Clickable breakdowns (`lib/analysisDetails.ts`)
-
-| Breakdown | Trigger | Shows |
-|-----------|---------|-------|
-| Fillers | Fillers panel | Per-filler counts |
-| Repetitions | Disfluency panel | Word/phrase repeats + example sentences |
-| Restarts | Clarity panel | Matched restart span + highlighted sentence |
-| Incomplete | Clarity panel | Flagged sentences (ellipsis, dash, fragment, trailing conjunction) |
-| Hedging | Clarity panel | Per-phrase counts + highlighted sentences |
+**File:** `computeOverallScore()` in `app/analysis/page.tsx`
 
 ---
 
-### 6.4 Session trend graph (`/analysis/graph`)
+### 5.4 Vocabulary / lexical richness
 
-- **Data:** `lib/sessionHistory.ts` — array of `SessionRecord` in localStorage
-- **Dedup:** Same transcript fingerprint or same score within 60s → no duplicate entry
-- **Chart:** SVG polyline of `overallScore` over time
+**What it measures:** Did you use varied words or repeat the same ones?
 
----
+**How:**
+- **TTR** = unique words ÷ total words
+- **MATTR** = same idea but averaged over sliding windows (fairer for long text)
+- Label: *limited / moderate / rich*
+- **CEFR tags:** Common words mapped to levels A1–C2; average gives a vocabulary band estimate
 
-### 6.5 Sentence drills (`/drills`)
-
-- **STT primary:** Web Speech API (`lib/drillWebSpeech.ts`) — mic preflight, retries, clear errors
-- **STT fallback:** MediaRecorder → `/api/transcribe` → **Whisper-1**
-- **Scoring:** `lib/drillCompare.ts`
-- **Pace:** `lib/drillPace.ts` — WPM bands for echo drills
-- **Progress:** `lib/drillProgress.ts` — per-sentence pass/soft-pass in localStorage
-- **Modes:** Standard sentences + **minimal pairs** (`lib/minimalPairs.ts`) for pronunciation contrast
-
-#### Drill scoring algorithm
-
-1. Normalize text (lowercase, alphanumeric tokens)
-2. **Word-level Levenshtein** alignment with **phonetic equivalence groups** (e.g. `their`/`there`, `would`/`wood`)
-3. **Similarity** = `1 - (editDistance / refWordCount)`
-4. **Tiers:**
-   - `perfect` — exact or all mismatches phonetically equivalent
-   - `soft` — ≥95% similar (likely STT mishear)
-   - `close` — ≥50% similar
-   - `retry` — below 50%
-5. **Word diff UI:** `DrillWordDiff.tsx` — match / substitute / insert / delete highlighting
+**Files:** `computeLexicalDiversity()` in analysis page; `lib/cefrWordLevels.ts`
 
 ---
 
-### 6.6 Picture talk (`/picture-talk`)
+### 5.5 Fillers
 
-- **Task:** Describe a random image for **60 seconds** (`lib/pictureTalkTasks.ts`)
-- **STT:** Web Speech (same family as drills)
-- **Scoring:** `lib/pictureTalkRubric.ts` — **fixed rubric** (comparable across images)
+**What it measures:** How often you use hesitation words and where (start, middle, or end of sentences).
 
-#### Picture talk metrics
+**How:** Rule-based lists + regex:
+- Single words: um, uh, like, actually, basically…
+- Phrases: you know, I mean, kind of, sort of
+- “Well / so / okay” counted mainly at **sentence start**
 
-| Metric | Weight in overall | How calculated |
-|--------|-------------------|----------------|
-| Scene detail | 46% | Image cue hits + observation vocabulary + substantive word density |
-| Fluency | 36% | Filler rate per 100 words + low TTR penalty |
-| Pace fit | 18% | WPM band fit (ideal ~100–165 wpm) |
-
-**Scene cues:** Per-image word list — whole-word regex match  
-**Observation terms:** e.g. *see, foreground, wearing, atmosphere*  
-**Substantive words:** Tokens length ≥4, not in stopword list
+**File:** `computeFillerPatterns()` + `lib/analysisDetails.ts` → `extractFillerBreakdown()`
 
 ---
 
-## 7. Metrics reference (Practice analysis)
+### 5.6 Repetitions (disfluency)
 
-All computed in `app/analysis/page.tsx` unless noted.
+**What it measures:** When you say the same word or short phrase twice in a row.
 
-### 7.1 Basic metrics (`computeBasicMetrics`)
+**How:** Regular expressions on the transcript, e.g. `word word` or `two words two words`.
 
-| Metric | Formula / technique |
-|--------|---------------------|
-| **Word count** | `transcript.split(/\s+/).length` |
-| **WPM** | `wordCount / durationMinutes` — uses real call duration if available, else estimates `wordCount/120` min |
-| **Filler count** | Same detector as filler patterns (`computeFillerPatterns`) |
-| **Hesitation ratio** | `fillerCount / wordCount` |
-| **Repetition count** | Regex: `\b(\w+)\s+\1\b` and `\b(\w+\s+\w+)\s+\1\b` |
-| **Fluency score** | `100 - min(50, hesitationRatio×300) - min(30, repetitionRatio×400)` |
+**File:** `countRepetitions()` + `extractRepetitionBreakdown()`
 
-### 7.2 Overall score (`computeOverallScore`)
+---
 
-Weighted blend (0–100):
+### 5.7 Clarity (restarts, incomplete sentences, hedging)
 
-```
-overall = fluency×0.45
-        + (richness×100)×0.25
-        + hesitationPenalty×0.15
-        + repetitionPenalty×0.075
-        + fillerPenalty×0.075
+**What it measures:** How clear and direct your message is.
 
-where:
-  hesitationPenalty = max(0, 100 - hesitationRatio×500)
-  repetitionPenalty = max(0, 100 - repetitionCount×8)
-  fillerPenalty     = max(0, 100 - totalFillers×5)
-```
+| Signal | Example | How we detect |
+|--------|---------|----------------|
+| **Sentence restart** | “I… I mean I went” | Repeated word/phrase patterns |
+| **Incomplete sentence** | Ends with “and…”, very short fragment | Ellipsis, dashes, trailing conjunctions, ≤2 words |
+| **Hedging** | “I think”, “maybe”, “kind of” | Phrase list + regex |
 
-### 7.3 Lexical diversity (`computeLexicalDiversity`)
+**Levels:** Low / Medium / High based on counts.
 
-| Term | Meaning |
+**Click breakdown:** Shows **highlighted sentences** + **voice replay** (your recording at that moment).
+
+**File:** `computeClarityCountMetrics()` + `lib/analysisDetails.ts`
+
+---
+
+### 5.8 Rhythm / mid-answer hesitation
+
+**What it measures:** When you **stop in the middle of your answer** (searching for a word), then continue — **not** silence while the AI talks.
+
+**How (best case):**  
+Mic **VAD** (voice activity detection) during the call tracks answer windows and pauses.
+
+**How (fallback):**  
+If no mic data, estimate from transcript markers (`...`, `—`, commas).
+
+**File:** `lib/answerHesitationPauses.ts`, `lib/pauseRhythm.ts`
+
+---
+
+### 5.9 Grammar
+
+**What it measures:** Obvious grammar/spelling issues in the transcript.
+
+**How:** Transcript sent to **LanguageTool** API (`/api/grammar`). Issue count → grammar score.
+
+**Note:** This is **after the call**, async — does not block other metrics.
+
+---
+
+### 5.10 Communication radar (6 axes)
+
+**What it measures:** Visual spider chart — vocabulary, fluency, grammar, coherence, clarity, confidence.
+
+**How:** **Derived from metrics above** — formulas, not a separate ML model. Does **not** change the overall score.
+
+**File:** `lib/communicationRadar.ts`
+
+---
+
+### 5.11 Coach cards
+
+**What it measures:** Nothing new — gives **tips** based on thresholds.
+
+**How:** Rule-based if/else (“if fillers high → suggest …”). Up to 2 strengths + 3 next steps.
+
+**File:** `lib/coachTips.ts`
+
+---
+
+### 5.12 Session trend graph
+
+**What it measures:** Progress over multiple practice calls.
+
+**How:** Each analysis visit saves overall score + date in `localStorage`. SVG chart on `/analysis/graph`.
+
+**File:** `lib/sessionHistory.ts`
+
+---
+
+### 5.13 Clarity voice replay
+
+**What it does:** Play **your real voice** when you click a flagged sentence.
+
+**How:**
+1. Full mic recording saved at call end
+2. Optional **word timestamps** from Deepgram/Whisper (`/api/transcribe/align`)
+3. Map flagged sentence → `startSec` / `endSec`
+4. Play that slice; show **transcript text** (before + flagged + after)
+
+**This is for UX replay — not for calculating fluency score.**
+
+---
+
+## 6. Other features (not the main Vapi analysis)
+
+### Sentence drills (`/drills`)
+
+- User reads a sentence aloud
+- ASR: Web Speech or Whisper
+- **Scoring:** Compare user text to reference with **edit distance** + phonetic forgiveness (sounds-alike words)
+- Pass / soft pass / retry tiers
+
+### Picture talk (`/picture-talk`)
+
+- Describe an image for **60 seconds**
+- Rubric: scene detail, fluency, fillers, pace — **fixed weights**, comparable across images
+
+### Prompt roulette (`/prompts`)
+
+- Random speaking topic — warm-up only, no scoring
+
+---
+
+## 7. What uses AI / ML vs simple rules?
+
+| Part | Type | Interview phrase |
+|------|------|------------------|
+| Fillers, repeats, clarity, TTR, overall score | **Rules + statistics** | “Explainable NLP” |
+| Coach tips, radar (except grammar) | **Rules** | “Expert system” |
+| Drill matching | **Edit distance** | “String algorithms” |
+| Live voice call | **Vapi (hosted AI)** | “Third-party voice platform” |
+| ASR | **Vapi / Web Speech / Whisper** | “We consume ASR, we don’t train it” |
+| Grammar check | **LanguageTool API** | “External grammar service” |
+| Word timestamps for replay | **Deepgram / Whisper** | “Post-call alignment only” |
+| Mid-answer hesitation | **Audio VAD** | “Signal processing, not deep learning” |
+
+**Honest line:**  
+*“Core proficiency analytics are transcript-based and rule-driven so scores are fast, free, and explainable. Audio ML is used only where text is weak: hesitation timing and synced replay.”*
+
+---
+
+## 8. Where is data stored?
+
+| Data | Storage |
 |------|---------|
-| **TTR** (Type–Token Ratio) | `uniqueWords / totalWords` |
-| **MATTR** | Moving-average TTR, window = 50 tokens |
-| **Richness** | MATTR if ≥50 words, else TTR |
-| **Label** | `limited` (<0.45), `moderate`, `rich` (≥0.60) |
+| Transcript, duration, conversation, word timestamps, session history | **Browser localStorage** |
+| Full call audio, per-segment clips | **Browser IndexedDB** |
+| User accounts / cloud DB | **Not in this demo** |
 
-**Technique:** Classical corpus linguistics — no embedding model.
-
-### 7.4 Filler patterns (`computeFillerPatterns`)
-
-**Single-word fillers (regex):** um/uh, like, actually, basically, kinda/sorta  
-**Phrases (token match):** you know, I mean, kind of, sort of  
-**Start-only:** well, so, okay, ok (only at sentence index 0–1)
-
-**Position classification:** Word index / sentence length → start (&lt;⅓), mid, end (&gt;⅔)
-
-**Pattern label:** Human-readable summary (e.g. “More fillers at start…”)
-
-### 7.5 Pause & rhythm (`computePauseRhythm`)
-
-**Note:** No audio waveform analysis — uses **textual pause markers** in transcript.
-
-| Marker | Counted as |
-|--------|------------|
-| `...` ellipsis | Long pause (+1.2s est.) |
-| `--` / `—` | Long pause (+0.9s) |
-| word “pause” | Long pause (+1.4s) |
-| `,` `;` | Short pause (+0.45s) |
-| `.?!` | Boundary pause (+0.7s) |
-
-```
-pauseRatio = totalPauseSeconds / (speakingSeconds + totalPauseSeconds)
-speakingSeconds ≈ wordCount × 0.33  (~180 wpm assumption)
-longPauseCount = ellipsis + "pause" word + dashes
-```
-
-**Insight rules:** Combines long pause count + pause-at-sentence-start rate.
-
-### 7.6 Clarity metrics (`computeClarityCountMetrics`)
-
-| Metric | Detection technique |
-|--------|---------------------|
-| **Sentence restarts** | `\b(\w+)\s*\.\.\.\s*\1\b`, `\b(\w+)\s+\1\b`, phrase repeats — sum × **0.7** (overlap correction) |
-| **Incomplete sentences** | Ellipsis, dashes, trailing and/but/so/because, sentences ≤2 words |
-| **Hedging phrases** | Regex list: I think, I guess, maybe, probably, kind of, sort of, perhaps, I feel like, not sure |
-
-**Levels:** Low / Medium / High from count thresholds (e.g. restarts: 3/7).
-
-### 7.7 Grammar (LanguageTool — `/api/grammar`)
-
-- **Model:** LanguageTool rule-based grammar checker (not a neural LM)
-- **Input:** Up to 15,000 chars, `language=en-US`
-- **Score:** `grammarScoreFromIssueCount(issueCount, wordCount)`
-
-```
-per100 = (issueCount / wordCount) × 100
-penalty = min(55, issueCount×3.5) + min(25, per100×6)
-grammarScore = clamp(100 - penalty, 0, 100)
-```
-
-### 7.8 Communication radar axes (additive — see §6.3)
-
-**Coherence proxy:**
-- Base 72; +12 if avg words/sentence 7–28; penalties for very short/long sentences, repeats, long pauses
-
-**Clarity score:**
-- `100 - restarts×6 - incomplete×4 - hedging×3`
-
-**Confidence proxy:**
-- Starts at 100; subtract filler start %, hedging count, hesitation ratio, total fillers
+**Privacy answer:** *“Session data stays on the user’s device unless they clear browser data.”*
 
 ---
 
-## 8. What uses ML vs rules?
+## 9. Common interview questions & short answers
 
-| Component | ML / external model? | Technique |
-|-----------|----------------------|-----------|
-| Core fluency, fillers, clarity | **No** | Regex + token stats |
-| Lexical diversity | **No** | TTR / MATTR |
-| Drill matching | **No** | Levenshtein + phonetic groups |
-| Picture talk rubric | **No** | Weighted heuristic rubric |
-| Coach tips | **No** | Rule-based |
-| Communication radar | **Mostly no** | Derived formulas; grammar axis uses LanguageTool |
-| Practice voice AI | **Yes (Vapi)** | Hosted voice stack |
-| Drill STT fallback | **Yes** | OpenAI Whisper |
-| Grammar axis | **Hybrid** | LanguageTool (rules + ML hybrid internally) |
-| Sentiment API | **Yes** | RoBERTa — **not wired to analysis UI** |
+### “What is your project?”
+A spoken English practice app with live AI calls and automatic feedback on fluency, vocabulary, clarity, and grammar — plus drills and progress charts.
 
----
+### “What is ASR?”
+Automatic Speech Recognition — converting speech to text. We use Vapi during calls and optional Deepgram/Whisper for alignment.
 
-## 9. Data storage (localStorage keys)
+### “Do you analyze in real time?”
+Partially. Live transcript appears during the call. **Full analysis runs after the call ends** in the browser.
 
-| Key | Content |
-|-----|---------|
-| `vtfb_user_transcript` | Normalized user speech |
-| `vtfb_conversation` | Chat turns JSON |
-| `vtfb_call_duration_sec` | Call length (seconds) |
-| `vtfb_session_history` | Analysis session records |
-| `vtfb_drill_progress` | Drill pass stats per sentence |
-| Picture talk history | Separate key in `pictureTalkHistory.ts` |
+### “Why transcript-based instead of audio?”
+Faster, cheaper, explainable, and good enough for fillers, vocabulary, and clarity. We add **audio only** for hesitation and voice replay.
 
-**Privacy:** All data stays in the browser unless user clears site data.
+### “How do you handle duplicate transcript text from streaming?”
+We keep **final** segments only, merge overlapping chunks, and deduplicate similar sentences (Jaccard similarity).
 
----
+### “What is TTR / MATTR?”
+Type–Token Ratio — unique words divided by total words. MATTR smooths this over a sliding window so long speeches are scored fairly.
 
-## 10. Key source files
+### “How is overall score calculated?”
+Weighted combination of fluency, vocabulary richness, and penalties for fillers and repetitions — all from the transcript.
 
-```
-app/
-  practice/page.tsx       — Vapi call, transcript capture
-  analysis/page.tsx       — ALL practice analysis formulas
-  analysis/graph/page.tsx — Score trend chart
-  drills/page.tsx         — Sentence drills UI
-  picture-talk/           — Timed description task
-  api/grammar/            — LanguageTool proxy
-  api/transcribe/         — Whisper proxy
-  api/sentiment/          — HF sentiment (optional)
+### “What is Vapi?”
+A platform that connects microphone, speech-to-text, AI brain, and text-to-speech for real-time voice conversations in the browser.
 
-lib/
-  practiceTranscript.ts   — Dedup & merge streaming ASR
-  practiceConversation.ts — Chat turn storage
-  analysisDetails.ts      — Filler/repeat/clarity breakdowns
-  communicationRadar.ts   — 6-axis radar formulas
-  coachTips.ts            — Rule-based coaching
-  drillCompare.ts         — Drill Levenshtein scoring
-  drillPace.ts            — Drill WPM bands
-  pictureTalkRubric.ts    — Picture talk scoring
-  sessionHistory.ts       — Session persistence
+### “Did you use machine learning?”
+We use **hosted ML services** (Vapi, optional Whisper/Deepgram, LanguageTool). Our **own scoring logic is rule-based**, not a trained neural network.
 
-components/analysis/
-  AnalysisDashboard.tsx   — 7-panel UI
-  ConversationTranscriptPanel.tsx — Chat vs plain
-  ClarityBreakdownLists.tsx — Highlighted clarity examples
-```
+### “What would you improve next?”
+Word-level timestamps from every call, cloud storage, user accounts, pronunciation scoring from audio, export PDF reports.
+
+### “What was the hardest part?”
+Aligning **recorded audio** with **transcript text** for replay — solved with post-call Deepgram word timestamps and per-segment clips.
+
+### “Who is the target user?”
+English learners, interview candidates, or therapy/coaching scenarios — anyone who needs **structured speaking practice with numbers, not just subjective feedback**.
 
 ---
 
-## 11. Interview Q&A cheat sheet
+## 10. Tech stack (one table)
 
-**Q: What problem does this solve?**  
-A: Turns unstructured speaking practice into **measurable, repeatable feedback** — fillers, pace, vocabulary, clarity — with session tracking.
-
-**Q: Why transcript-based NLP instead of audio ML?**  
-A: Lighter, explainable, runs client-side; Vapi already provides STT; text markers proxy pauses without needing phoneme models.
-
-**Q: How is fluency score calculated?**  
-A: Rate-based penalties from filler ratio and back-to-back repetition ratio, capped so long sessions don’t collapse to zero.
-
-**Q: What is TTR vs MATTR?**  
-A: TTR = unique/total words (biased by length). MATTR = average TTR over sliding 50-word windows — more stable for longer speech.
-
-**Q: How do you detect fillers?**  
-A: Curated regex + multi-word token patterns, classified by position in sentence (start/mid/end).
-
-**Q: Is grammar checked by ChatGPT?**  
-A: No — **LanguageTool** via our Next.js API route; score derived from issue density.
-
-**Q: How do drills handle STT errors?**  
-A: Phonetic equivalence groups + soft pass at 95%+ similarity + optional Whisper fallback.
-
-**Q: Why deduplicate transcripts?**  
-A: Streaming ASR sends revised partials; we only append finals and merge/dedup overlaps (Jaccard + word overlap).
-
-**Q: What’s the difference between overall score and radar?**  
-A: Overall score is the **primary weighted metric** saved to history. Radar is an **additive visualization** across six communication dimensions.
-
-**Q: Limitations?**  
-A: Pause analysis is text-proxy not acoustic; user-only transcript for metrics; localStorage only; English-focused patterns; sentiment model not integrated in UI.
-
-**Q: Future improvements?**  
-A: Cloud sync, acoustic pause detection, prosody (pitch/energy), personalized filler lists, multilingual support, integrate sentiment into dashboard.
+| Layer | Choice |
+|-------|--------|
+| Frontend | Next.js 16, React 19, TypeScript, Tailwind |
+| Voice practice | Vapi Web SDK |
+| Analysis engine | Client-side JavaScript (regex, token math) |
+| Grammar | LanguageTool via `/api/grammar` |
+| Optional align | Deepgram or Whisper via `/api/transcribe/align` |
+| Storage | localStorage + IndexedDB |
 
 ---
 
-## 12. Architecture diagram
+## 11. Key files (if interviewer asks “show me the code”)
+
+| Topic | File |
+|-------|------|
+| Vapi call + save transcript | `app/practice/page.tsx` |
+| All practice metrics & overall score | `app/analysis/page.tsx` |
+| Dashboard UI (7 panels) | `components/analysis/AnalysisDashboard.tsx` |
+| Filler/repeat/clarity breakdowns | `lib/analysisDetails.ts` |
+| Transcript deduplication | `lib/practiceTranscript.ts` |
+| Mid-answer hesitation | `lib/answerHesitationPauses.ts` |
+| Word timestamps | `lib/practiceWordAlignment.ts`, `app/api/transcribe/align/route.ts` |
+| Radar & coach | `lib/communicationRadar.ts`, `lib/coachTips.ts` |
+| Drills scoring | `lib/drillCompare.ts` |
+| Picture talk rubric | `lib/pictureTalkRubric.ts` |
+
+---
+
+## 12. Architecture diagram (for whiteboard / slide)
 
 ```mermaid
 flowchart TB
-  subgraph Input
-    Vapi[Vapi Voice Call]
-    WebSTT[Web Speech API]
-    Whisper[OpenAI Whisper optional]
+  subgraph realtime [During call]
+    MIC[User microphone]
+    VAPI[Vapi voice AI]
+    ASR[ASR - speech to text]
+    LIVE[Live transcript preview]
+    VAD[Mic VAD - hesitation tracker]
+    MIC --> VAPI
+    VAPI --> ASR
+    ASR --> LIVE
+    MIC --> VAD
   end
 
-  subgraph Storage
-    LS[(localStorage)]
+  subgraph postcall [After call ends]
+    SAVE[Save transcript + audio]
+    HES[Analyze hesitation]
+    ALIGN[Optional word timestamps]
+    STORE[(localStorage + IndexedDB)]
+    SAVE --> STORE
+    HES --> STORE
+    ALIGN --> STORE
   end
 
-  subgraph Analysis
-    Norm[normalizePracticeTranscript]
-    Metrics[Rule-based metrics]
-    LT[LanguageTool API]
-    Radar[Communication Radar]
-    Coach[Coach Rules]
+  subgraph analysis [Analysis page]
+    NLP[Rule-based NLP metrics]
+    LT[LanguageTool grammar]
+    UI[7-panel dashboard + graph]
+    REPLAY[Clarity voice replay]
+    STORE --> NLP
+    STORE --> REPLAY
+    NLP --> UI
+    LT --> UI
   end
 
-  subgraph UI
-    Practice[/practice]
-    Analysis[/analysis 7 panels]
-    Drills[/drills]
-    Pic[/picture-talk]
-    Graph[/analysis/graph]
-  end
-
-  Vapi --> Practice
-  Practice --> LS
-  LS --> Norm --> Metrics
-  Metrics --> Radar
-  Metrics --> Coach
-  Metrics --> LT
-  Metrics --> Analysis
-  WebSTT --> Drills
-  Whisper --> Drills
-  LS --> Graph
+  realtime --> postcall
+  postcall --> analysis
 ```
 
 ---
 
-## 13. Demo script (2 minutes)
+## 13. Related documents
 
-1. Open **Prompts** → spin a topic  
-2. **Practice** → start call, speak 30–60s, end call  
-3. **Analysis** → show Conversation chat view → Fluency → Clarity (click hedging)  
-4. Mention radar + coach notes on Conversation panel  
-5. **Graph** → show progress line  
-6. Optional: **Drills** → one sentence, show word diff  
-7. Optional: **Picture talk** → 60s describe, show rubric scores  
+| File | Best for |
+|------|----------|
+| **INTERVIEW_GUIDE.md** (this file) | HR / viva / simple explanations |
+| **PROJECT_DOCUMENTATION.md** | Deep technical report, formulas |
+| **README.md** | Setup, install, run locally |
 
 ---
 
-*Document version: matches codebase as of project implementation (Next.js 16, analysis 7-panel UI, conversation replay, clarity breakdowns, communication radar, coach cards, LanguageTool grammar).*
+*Last updated for current features: Vapi practice, 7-panel analysis, audio hesitation, CEFR vocabulary, Deepgram word-align replay, drills, picture talk.*
